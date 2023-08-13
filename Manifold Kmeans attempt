@@ -1,0 +1,157 @@
+import numpy as np
+from scipy.linalg import expm
+import matplotlib.pyplot as plt
+
+
+def generate_point_on_stiefel_Schmidt(n, k):
+    Y = np.zeros((n, k))
+    Y[:, 0] = np.ones((n,))
+    Y[:, 0] = Y[:, 0] / np.linalg.norm(Y[:, 0])
+    
+    for j in range(1, k):
+        Z = np.random.randn(n)
+        for i in range(j):
+            Z -= np.dot(Y[:, i], Z) * Y[:, i]
+        Y[:, j] = Z
+        Y[:, j] = Y[:, j] / np.linalg.norm(Y[:, j])
+    
+    return Y
+
+def generate_point_on_stiefel_Loulou(n, k):
+    Y = np.zeros((n, k))
+    Y[:k,:] = np.eye(k)
+    for i in range(k,n):
+        j = np.random.randint(k)
+        Y[i,j] = 1
+    for j in range(k):
+        Y[:,j] /= np.linalg.norm(Y[:,j])
+    return Y
+    
+
+def in_manifold(Y):
+    n,k = Y.shape
+    cond1 =  Y.T @ Y - np.eye(k)
+    cond2 =  Y @ Y.T @ np.ones((n,)) - np.ones((n,))
+    eps = 10**(-4) 
+    if ( np.linalg.norm(cond1) < eps) and (np.linalg.norm(cond2) < eps) :
+        return True
+    else : 
+        return False
+    
+def in_tangent_sapce(Y,V):
+    n,k = V.shape
+    cond1 =  V.T @ Y + Y.T @ V
+    cond2 = (V @ Y.T + Y @ V.T) @ np.ones((n,))
+    #print(np.linalg.norm(cond1))
+    #print(np.linalg.norm(cond2))
+    eps = 10**(-4)
+    if ( np.linalg.norm(cond1) < eps) and (np.linalg.norm(cond2) < eps) :
+        return True
+    else : 
+        return False
+    
+
+# Define the matrix D
+def matrix_D(X):
+    n,m = np.shape(X)
+    D = np.zeros((n,n))
+    for i in range(n):
+        for j in range(n):
+            D[i,j] = np.linalg.norm(X[i,:] - X[j,:])**2 
+    return D
+    
+
+# Define the objective function
+def objective(Y, D, lambda_):
+    neg_Y = np.where(Y < 0, Y, 0)
+    return np.trace(D @ Y @ Y.T) + lambda_*np.linalg.norm(neg_Y)
+
+# Define the Riemannian gradient of the objective function
+def grad(Y, D, lambda_):
+    neg_Y = np.where(Y < 0, Y, 0)
+    return 2* D @ Y + 2*lambda_*neg_Y
+
+def orth_proj(Y,W):
+    x = (1/n) * W @ Y.T @ np.ones((n,))
+    Omega = (1/4) * ( W.T @ Y + Y.T @ W - 2*Y.T @ ( x.reshape(n,1) @ np.ones((1,n)).reshape(1,n) + np.ones((n,)).reshape(n,1) @ x.reshape(1,n) ) @ Y )
+    return W - 2 * Y @ Omega - ( x.reshape(n,1) @ np.ones((1,n)).reshape(1,n) + np.ones((n,)).reshape(n,1) @ x.reshape(1,n) ) @ Y
+
+# Define the retraction function for the sphere manifold
+def retraction(Y, V):
+    A = Y.T @ V
+    A_ = Y @ A @ Y.T
+    B = V @ Y.T - Y @ V.T - 2*A_
+    #print("Norm of A_ is " + str(np.linalg.norm(A_)))
+    #print("Norm of B is " + str(np.linalg.norm(B)))
+    retY_V = expm(B) @ expm(A_) @ Y
+    #print("Norm of retY_V is " + str(np.linalg.norm(retY_V)))
+    #print(retY_V)
+    return retY_V
+
+def gradient_descent(Y0,lambda_,lr,num_iters):
+# Perform gradient descent on the sphere manifold
+    grad_Y_values = []
+    step_Y_values = []
+    Y = Y0
+    for i in range(num_iters):
+        #print("=====================")
+        #print("Iteration " + str(i))
+        #print("Matrix Y is in manifold : " + str(in_manifold(Y)))
+        #print(in_manifold(Y))
+        grad_Y = orth_proj(Y,grad(Y, D, lambda_))
+        #print("Norm of grad_Y is " + str(np.linalg.norm(grad_Y)))
+        #print("Matrix grad_Y is in tangent space : " + str(in_tangent_sapce(Y,grad_Y)))
+        grad_Y_values.append(np.linalg.norm(grad_Y))
+        V = - lr * grad_Y
+        step_Y_values.append(np.linalg.norm(Y - retraction(Y, V)))
+        Y = retraction(Y, V)
+        #retr_Y_values.append(np.linalg.norm(Y))
+            
+    return Y, grad_Y_values
+
+def optimizer(lambda0,Y0,lr0,eps):
+    Y = Y0 
+    lambda_ = lambda0
+    lr = lr0
+    i = 0
+    global plots 
+    while True :
+        print("=====================")
+        print("Iteration " + str(i))
+        print("lambda is " + str(lambda_))
+        Y,ys = gradient_descent(Y,lambda_,lr,num_iters)
+        print(in_manifold(Y))
+        lambda_ = 2*lambda_ + 1
+        lr *= 0.8
+        plots.append(ys)
+        i += 1
+
+        neg_Y = np.where(Y < 0, Y, 0)
+        if ( np.linalg.norm(neg_Y) < eps ):
+            return Y
+        
+def plot_gradient(plots):
+    ys = []
+    for plot in plots :
+        ys = ys + plot
+    xs = [x for x in range(len(ys))]
+    plt.plot(xs, ys)
+    plt.show()
+
+# Generate random data
+n, m, k = 100, 2, 4  # dimensions
+X = np.random.randn(n, m)
+D = matrix_D(X)
+
+# Initialize the starting point
+Y0 = generate_point_on_stiefel_Schmidt(n, k)
+Y0 = generate_point_on_stiefel_Loulou(n, k)
+print(in_manifold(Y0))
+
+# Set the learning rate, number of iterations and eps
+lr0 = 10**(-5)
+num_iters = 1000
+eps = 10**(-6)
+lambda0 = 0
+     
+plots = []
